@@ -41,14 +41,6 @@ private val Muted = Color(0xFF77717E)
 
 data class ReelItem(val id: String, val title: String, val url: String)
 
-class InstaViewApplication : android.app.Application() {
-    override fun onCreate() {
-        super.onCreate()
-        try { YoutubeDL.getInstance().init(this) }
-        catch (e: Exception) { android.util.Log.e("InstaView", "yt-dlp initialization failed", e) }
-    }
-}
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
