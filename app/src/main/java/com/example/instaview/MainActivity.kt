@@ -6,11 +6,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,7 +30,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 
 private val Pink = Color(0xFFE1306C)
 private val Purple = Color(0xFF833AB4)
@@ -116,7 +114,7 @@ fun InstaViewApp(context: Context) {
                                 if (validHost && uri.pathSegments.isNotEmpty()) {
                                     try {
                                     (context as? MainActivity)?.openProfile(uri)
-                                    status = "Profile opened inside InstaView. Instagram controls what can be viewed."
+                                    status = "Opening Instagram in your browser. Sign in there if Instagram asks you to."
                                     } catch (_: Exception) {
                                         status = "Could not open that link. Check the URL and try again."
                                     }
@@ -194,28 +192,18 @@ fun InstaViewApp(context: Context) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 private fun MainActivity.openProfile(uri: Uri) {
-    setContent {
-        MaterialTheme(colorScheme = lightColorScheme(primary = Pink)) {
-            Scaffold(topBar = {
-                TopAppBar(title = { Text("Instagram profile") }, navigationIcon = {
-                    TextButton(onClick = { setContent { InstaViewApp(this@openProfile) } }) { Text("Back") }
-                })
-            }) { padding ->
-                AndroidView(
-                    modifier = Modifier.fillMaxSize().padding(padding),
-                    factory = { viewContext -> WebView(viewContext).apply {
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.javaScriptCanOpenWindowsAutomatically = false
-                        settings.setSupportMultipleWindows(false)
-                        webViewClient = WebViewClient()
-                        loadUrl(uri.toString())
-                    } }
-                )
-            }
-        }
+    // Instagram may restrict sign-in and media playback in embedded WebViews.
+    // Custom Tabs use the user's installed browser and its existing login session.
+    val customTab = CustomTabsIntent.Builder()
+        .setShowTitle(true)
+        .build()
+
+    try {
+        customTab.launchUrl(this, uri)
+    } catch (_: android.content.ActivityNotFoundException) {
+        // Fallback for devices without a Custom Tabs provider.
+        startActivity(Intent(Intent.ACTION_VIEW, uri))
     }
 }
 
