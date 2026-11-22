@@ -1,234 +1,236 @@
 package com.example.instaview
 
-import android.app.DownloadManager
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
-import android.widget.Toast
+import android.widget.VideoView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.Executors
 
 private val Pink = Color(0xFFE1306C)
 private val Purple = Color(0xFF833AB4)
 private val Ink = Color(0xFF17131C)
-private val Muted = Color(0xFF77717E)
+private val Worker = Executors.newSingleThreadExecutor()
+
+data class Reel(val id: String, val title: String, val url: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { InstaViewApp(this) }
+        setContent { InstaViewApp() }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
     }
 }
 
 @Composable
-fun InstaViewApp(context: Context) {
-    var profileUrl by remember { mutableStateOf("") }
-    var mediaUrl by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf("Paste a public Instagram profile link to get started.") }
+private fun InstaViewApp() {
+    val context = LocalContext.current
+    var profile by remember { mutableStateOf("") }
+    var reels by remember { mutableStateOf(emptyList<Reel>()) }
+    var selected by remember { mutableStateOf<Reel?>(null) }
+    var streamUrl by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf("Enter a public Instagram username or profile URL.") }
+    var busy by remember { mutableStateOf(false) }
 
-    MaterialTheme(
-        colorScheme = lightColorScheme(
-            primary = Pink,
-            secondary = Purple,
-            background = Color(0xFFFAF8FB),
-            surface = Color.White
-        )
-    ) {
-        Scaffold(containerColor = Color(0xFFFAF8FB)) { padding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
+    MaterialTheme(colorScheme = lightColorScheme(primary = Pink, secondary = Purple)) {
+        Scaffold(containerColor = Color(0xFFFAF8FB)) { insets ->
+            Column(Modifier.fillMaxSize().padding(insets).padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .background(Brush.linearGradient(listOf(Purple, Pink, Color(0xFFFFA44B))), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text("InstaView", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
-                        Text("Public profile viewer", fontSize = 12.sp, color = Muted)
-                    }
+                    Text("InstaView", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, color = Ink)
                     Spacer(Modifier.weight(1f))
-                    Surface(color = Color(0xFFFCE8F0), shape = RoundedCornerShape(50)) {
-                        Text("BETA", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            color = Pink, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
+                    Text("OPEN SOURCE", color = Purple, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
-
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(22.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Explore a profile", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink)
-                        Text("Paste the link to a public Instagram profile.", color = Muted, fontSize = 13.sp)
-                        OutlinedTextField(
-                            value = profileUrl,
-                            onValueChange = { profileUrl = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("https://www.instagram.com/username/") },
-                            leadingIcon = { Icon(Icons.Default.Person, null) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp)
-                        )
-                        Button(
-                            onClick = {
-                                val clean = profileUrl.trim().let {
-                                    if (it.startsWith("http://") || it.startsWith("https://")) it else "https://$it"
-                                }
-                                val uri = Uri.parse(clean)
-                                val validHost = uri.host?.lowercase() in listOf("instagram.com", "www.instagram.com")
-                                if (validHost && uri.pathSegments.isNotEmpty()) {
+                Text("Public Reels viewer • authorized downloads", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = profile, onValueChange = { profile = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("Instagram username or profile URL") },
+                    placeholder = { Text("username or instagram.com/username") }
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        enabled = !busy,
+                        onClick = {
+                            val username = normalizeProfile(profile)
+                            if (username == null) {
+                                status = "Enter a valid instagram.com public profile or username."
+                            } else {
+                                busy = true
+                                status = "Finding public Reels…"
+                                reels = emptyList()
+                                selected = null
+                                streamUrl = null
+                                Worker.execute {
                                     try {
-                                    (context as? MainActivity)?.openProfile(uri)
-                                    status = "Opening Instagram in your browser. Sign in there if Instagram asks you to."
-                                    } catch (_: Exception) {
-                                        status = "Could not open that link. Check the URL and try again."
+                                        val url = "https://www.instagram.com/$username/reels/"
+                                        val request = YoutubeDLRequest(url).apply {
+                                            addOption("--flat-playlist")
+                                            addOption("--dump-single-json")
+                                            addOption("--playlist-end", "20")
+                                            addOption("--no-warnings")
+                                        }
+                                        val output = YoutubeDL.getInstance().execute(request).out
+                                        val json = JSONObject(output)
+                                        val entries = json.optJSONArray("entries")
+                                        val found = mutableListOf<Reel>()
+                                        if (entries != null) {
+                                            for (i in 0 until entries.length()) {
+                                                val item = entries.optJSONObject(i) ?: continue
+                                                val id = item.optString("id").takeIf { it.isNotBlank() } ?: continue
+                                                val page = item.optString("webpage_url").takeIf { it.startsWith("http") }
+                                                    ?: item.optString("url").takeIf { it.startsWith("http") }
+                                                    ?: "https://www.instagram.com/reel/$id/"
+                                                found += Reel(id, item.optString("title").ifBlank { "Instagram Reel" }, page)
+                                            }
+                                        }
+                                        (context as MainActivity).runOnUiThread {
+                                            reels = found
+                                            status = if (found.isEmpty()) "No public Reels were returned. Instagram may require login or may have blocked extraction." else "Found ${found.size} public Reel(s). Select Play or Download."
+                                            busy = false
+                                        }
+                                    } catch (e: Exception) {
+                                        (context as MainActivity).runOnUiThread {
+                                            status = "Could not load Reels: ${e.message ?: "Instagram did not provide public data."}"
+                                            busy = false
+                                        }
                                     }
-                                } else {
-                                    status = "Enter a valid public Instagram profile URL."
                                 }
-                            },
-                            modifier = Modifier.fillMaxWidth().height(50.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Pink)
-                        ) {
-                            Icon(Icons.Default.Link, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Open profile", fontWeight = FontWeight.Bold)
-                        }
-                    }
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Icon(Icons.Default.Link, null); Spacer(Modifier.width(6.dp)); Text("Load Reels") }
+                    OutlinedButton(onClick = {
+                        val username = normalizeProfile(profile)
+                        if (username != null) openInstagram(context, Uri.parse("https://www.instagram.com/$username/"))
+                        else status = "Enter a valid Instagram profile first."
+                    }) { Text("Open profile") }
                 }
-
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Ink),
-                    shape = RoundedCornerShape(22.dp)
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                Text(status, style = MaterialTheme.typography.bodySmall, color = Color.DarkGray, modifier = Modifier.padding(vertical = 10.dp))
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("HD video downloader", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                        Text(
-                            "Download a direct video file URL that you own or have permission to save. Instagram post links are not direct video files.",
-                            color = Color(0xFFD2CBD8), fontSize = 12.sp, lineHeight = 18.sp
-                        )
-                        OutlinedTextField(
-                            value = mediaUrl,
-                            onValueChange = { mediaUrl = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("https://example.com/video.mp4") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Pink,
-                                unfocusedBorderColor = Color(0xFF5C5363),
-                                focusedPlaceholderColor = Color(0xFFB9B0C0),
-                                unfocusedPlaceholderColor = Color(0xFFB9B0C0),
-                                cursorColor = Pink
-                            )
-                        )
-                        Button(
-                            onClick = { startDownload(context, mediaUrl.trim()) { status = it } },
-                            modifier = Modifier.fillMaxWidth().height(50.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Pink)
-                        ) {
-                            Icon(Icons.Default.Download, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Download video", fontWeight = FontWeight.Bold)
+                    items(reels, key = { it.id }) { reel ->
+                        Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(reel.title, fontWeight = FontWeight.Bold)
+                                Text("Reel ID: ${reel.id}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = {
+                                            selected = reel
+                                            streamUrl = null
+                                            status = "Resolving playable video…"
+                                            Worker.execute {
+                                                try {
+                                                    val info = YoutubeDL.getInstance().getInfo(reel.url)
+                                                    val direct = info.url
+                                                    (context as MainActivity).runOnUiThread {
+                                                        streamUrl = direct
+                                                        status = if (direct.isNullOrBlank()) "No playable stream was provided." else "Playing selected Reel."
+                                                    }
+                                                } catch (e: Exception) {
+                                                    (context as MainActivity).runOnUiThread { status = "Playback unavailable: ${e.message ?: "Instagram blocked this Reel."}" }
+                                                }
+                                            }
+                                        }
+                                    ) { Icon(Icons.Default.PlayArrow, null); Text("Play") }
+                                    OutlinedButton(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = {
+                                            status = "Downloading authorized Reel…"
+                                            Worker.execute {
+                                                try {
+                                                    val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "InstaView")
+                                                    if (!dir.exists()) dir.mkdirs()
+                                                    val request = YoutubeDLRequest(reel.url).apply {
+                                                        addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
+                                                        addOption("--merge-output-format", "mp4")
+                                                        addOption("--no-part")
+                                                        addOption("-o", File(dir, "%(title).80s-%(id)s.%(ext)s").absolutePath)
+                                                    }
+                                                    YoutubeDL.getInstance().execute(request, "reel-${reel.id}")
+                                                    (context as MainActivity).runOnUiThread { status = "Download saved in Downloads/InstaView." }
+                                                } catch (e: Exception) {
+                                                    (context as MainActivity).runOnUiThread { status = "Download failed: ${e.message ?: "Instagram blocked this Reel."}" }
+                                                }
+                                            }
+                                        }
+                                    ) { Icon(Icons.Default.Download, null); Text("Download") }
+                                }
+                                if (selected?.id == reel.id && !streamUrl.isNullOrBlank()) {
+                                    AndroidView(
+                                        modifier = Modifier.fillMaxWidth().height(360.dp),
+                                        factory = { ctx ->
+                                            VideoView(ctx).apply {
+                                                setVideoURI(Uri.parse(streamUrl))
+                                                setOnPreparedListener { it.isLooping = true; start() }
+                                            }
+                                        },
+                                        update = { view ->
+                                            if (view.tag != streamUrl) {
+                                                view.tag = streamUrl
+                                                view.setVideoURI(Uri.parse(streamUrl))
+                                                view.setOnPreparedListener { it.isLooping = true; it.start() }
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-
-                Surface(color = Color(0xFFF1ECF5), shape = RoundedCornerShape(16.dp)) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
-                        Text("i", color = Purple, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            "Current build: profile links open through Instagram's public web experience. Automatic profile scraping, Reels extraction and watermark removal are not implemented.",
-                            color = Color(0xFF51465B), fontSize = 12.sp, lineHeight = 17.sp
-                        )
-                    }
-                }
-
-                Text(status, color = Muted, fontSize = 12.sp)
-                Text("InstaView • Version 0.1.0", color = Color(0xFFAAA3AE), fontSize = 11.sp,
-                    modifier = Modifier.align(Alignment.CenterHorizontally))
+                Text("Only download videos you own or have permission to save. Public access is not permission by itself. Instagram may block extraction or require login; InstaView does not bypass those restrictions.", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
             }
         }
     }
 }
 
-private fun MainActivity.openProfile(uri: Uri) {
-    // Instagram may restrict sign-in and media playback in embedded WebViews.
-    // Custom Tabs use the user's installed browser and its existing login session.
-    val customTab = CustomTabsIntent.Builder()
-        .setShowTitle(true)
-        .build()
-
-    try {
-        customTab.launchUrl(this, uri)
-    } catch (_: android.content.ActivityNotFoundException) {
-        // Fallback for devices without a Custom Tabs provider.
-        startActivity(Intent(Intent.ACTION_VIEW, uri))
-    }
+private fun normalizeProfile(input: String): String? {
+    val value = input.trim().removePrefix("@")
+    if (value.isBlank()) return null
+    val uri = runCatching { Uri.parse(if (value.startsWith("http")) value else "https://www.instagram.com/$value/") }.getOrNull() ?: return null
+    if (uri.scheme != "https" || uri.host?.lowercase() !in listOf("instagram.com", "www.instagram.com")) return null
+    val username = uri.pathSegments.firstOrNull() ?: return null
+    if (username in listOf("reel", "reels", "p", "stories", "accounts", "explore")) return null
+    return username.takeIf { it.matches(Regex("[A-Za-z0-9._]{1,30}")) }
 }
 
-private fun startDownload(context: Context, url: String, report: (String) -> Unit) {
-    val uri = runCatching { Uri.parse(url) }.getOrNull()
-    if (uri == null || uri.scheme != "https" || uri.host.isNullOrBlank() ||
-        !(url.lowercase().substringBefore("?").endsWith(".mp4") ||
-          url.lowercase().substringBefore("?").endsWith(".m4v") ||
-          url.lowercase().substringBefore("?").endsWith(".webm"))) {
-        report("Enter a valid HTTPS direct video URL ending in .mp4, .m4v or .webm.")
-        return
-    }
+private fun openInstagram(context: Context, uri: Uri) {
     try {
-        val request = DownloadManager.Request(uri)
-            .setTitle("InstaView video")
-            .setDescription("Downloading authorized video")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "InstaView_${System.currentTimeMillis()}.mp4")
-            .setAllowedOverMetered(true)
-            .setAllowedOverRoaming(false)
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        manager.enqueue(request)
-        report("Download started. Check your Downloads folder.")
-        Toast.makeText(context, "Download started", Toast.LENGTH_SHORT).show()
+        CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, uri)
     } catch (_: Exception) {
-        report("Download could not start. Check the URL and your connection.")
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
     }
 }
