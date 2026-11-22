@@ -194,6 +194,7 @@ fun InstaViewApp(context: Context) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 private fun MainActivity.openProfile(uri: Uri) {
     setContent {
         MaterialTheme(colorScheme = lightColorScheme(primary = Pink)) {
